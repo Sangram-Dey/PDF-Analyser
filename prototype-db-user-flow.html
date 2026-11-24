@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sourcework data flow (prototype)</title>
+<style>
+  :root { --accent:#177f73; --accent-soft:#e3f3f1; --ink:#172b33; --muted:#60767a; --line:#d8e1e3; --bg:#f7f9f9; --warn:#b4472b; --warn-soft:#fbeae5; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color:var(--ink); background:var(--bg); }
+  main { max-width:1180px; margin:0 auto; padding:28px 16px 60px; }
+  h1 { font-size:26px; margin:0 0 4px; } h2 { font-size:17px; margin:0 0 12px; } h3 { font-size:14px; margin:0 0 8px; }
+  .tag { display:inline-block; font-size:11px; letter-spacing:.08em; color:var(--warn); background:var(--warn-soft); padding:2px 8px; border-radius:99px; margin-bottom:8px; }
+  .intro { color:var(--muted); max-width:820px; margin:0 0 24px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:18px; }
+  .grid2 { display:grid; grid-template-columns: 1.25fr 1fr; gap:18px; }
+  @media (max-width:900px){ .grid2 { grid-template-columns:1fr; } }
+  svg { width:100%; height:auto; display:block; }
+  .box rect { fill:#fff; stroke:var(--line); stroke-width:1.5; }
+  .box.hot rect { fill:var(--accent-soft); stroke:var(--accent); stroke-width:2.5; }
+  .box .t { font-weight:700; font-size:14px; fill:var(--ink); }
+  .box .s { font-size:11px; fill:var(--muted); }
+  .box .f { font-size:11.5px; fill:var(--ink); font-family:ui-monospace, Consolas, monospace; }
+  .rel { stroke:#9fb2b6; stroke-width:1.5; fill:none; }
+  .rel-l { font-size:11px; fill:var(--muted); }
+  .store-l { font-size:11px; letter-spacing:.08em; fill:var(--accent); font-weight:700; }
+  .flow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .step { border:1.5px solid var(--line); border-radius:10px; padding:8px 12px; background:#fff; font-size:13px; }
+  .step small { display:block; color:var(--muted); font-size:11px; }
+  .step.hot { border-color:var(--accent); background:var(--accent-soft); }
+  .arrow { color:#9fb2b6; }
+  .buttons { display:flex; flex-wrap:wrap; gap:8px; }
+  button { font:inherit; font-size:13px; border:1px solid var(--line); background:#fff; color:var(--ink); padding:7px 12px; border-radius:8px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.bad { color:var(--warn); }
+  button:disabled { opacity:.4; cursor:default; }
+  .stores { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  @media (max-width:900px){ .stores { grid-template-columns:1fr; } }
+  .store { border:1px solid var(--line); border-radius:10px; padding:12px; min-height:120px; }
+  .store.hot { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+  .store .where { font-size:11px; color:var(--muted); font-family:ui-monospace, Consolas, monospace; margin-bottom:8px; }
+  .item { border-left:3px solid var(--line); padding:4px 8px; margin:6px 0; font-size:12.5px; }
+  .item.new { border-left-color:var(--accent); background:var(--accent-soft); }
+  .item .k { color:var(--muted); }
+  .empty { color:var(--muted); font-size:12.5px; font-style:italic; }
+  .mono { font-family:ui-monospace, Consolas, monospace; font-size:12px; }
+  .result { border-radius:10px; padding:12px 14px; margin-top:12px; background:var(--accent-soft); }
+  .result.err { background:var(--warn-soft); }
+  .result ul { margin:6px 0 0; padding-left:18px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:6px; border-bottom:1px solid var(--line); margin-bottom:12px; }
+  .tabs button { border:none; border-bottom:2px solid transparent; border-radius:0; padding:8px 10px; }
+  .tabs button.on { border-bottom-color:var(--accent); color:var(--accent); font-weight:600; }
+  ol.steps { padding-left:20px; } ol.steps li { margin:6px 0; }
+  ol.steps li.done { color:var(--muted); text-decoration:line-through; }
+  .log { font-size:12.5px; color:var(--muted); max-height:160px; overflow:auto; }
+  .log div { padding:2px 0; border-bottom:1px dashed var(--line); }
+  label.inline { font-size:13px; color:var(--muted); margin-right:6px; }
+  select { font:inherit; font-size:13px; padding:6px; border-radius:8px; border:1px solid var(--line); }
+</style>
+</head>
+<body>
+<main>
+  <span class="tag">PROTOTYPE · THROWAWAY · in-memory only</span>
+  <h1>How Sourcework stores your data</h1>
+  <p class="intro">
+    <b>Question this answers:</b> when a user creates a project, imports a file, asks a question, exports fields or deletes something,
+    which of the three stores change, and do they stay in step (also when an upload fails halfway)?
+    The three stores are the <b>project list</b> (<span class="mono">data/projects.json</span>), the <b>parsed text files</b>
+    (<span class="mono">data/documents/&lt;id&gt;.json</span>) and the <b>search index</b> (Pinecone, one namespace per project).
+    Click buttons below. Boxes that just changed light up in green. Nothing here touches the real app.
+  </p>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>1. Data model</h2>
+      <svg viewBox="0 0 640 485" aria-label="Entity relationship diagram">
+        <text class="store-l" x="10" y="16">PROJECT LIST · data/projects.json</text>
+        <text class="store-l" x="350" y="16">SEARCH INDEX · Pinecone</text>
+        <text class="store-l" x="10" y="476">PARSED TEXT · data/documents/{id}.json</text>
+
+        <path class="rel" d="M150 118 V150"/><text class="rel-l" x="158" y="140">1 project → many documents</text>
+        <path class="rel" d="M290 70 H360"/><text class="rel-l" x="296" y="62">1 → 1</text><text class="rel-l" x="296" y="86">namespace = id</text>
+        <path class="rel" d="M290 220 C330 220 330 270 360 270"/><text class="rel-l" x="296" y="210">1 → many</text>
+        <path class="rel" d="M490 118 V200"/><text class="rel-l" x="498" y="165">contains</text>
+        <path class="rel" d="M150 290 V328"/><text class="rel-l" x="158" y="314">1 → 1 file</text>
+        <path class="rel" d="M290 400 C340 400 330 340 360 330"/><text class="rel-l" x="296" y="420">1 section → many chunks</text>
+
+        <g class="box" id="d-project"><rect x="10" y="26" width="280" height="92" rx="10"/>
+          <text class="t" x="24" y="48">Project</text>
+          <text class="f" x="24" y="70">id (key) · name</text>
+          <text class="f" x="24" y="88">createdAt</text>
+          <text class="s" x="24" y="108">documents[] stored inside it</text></g>
+
+        <g class="box" id="d-document"><rect x="10" y="150" width="280" height="140" rx="10"/>
+          <text class="t" x="24" y="172">Document</text>
+          <text class="f" x="24" y="194">id (key) · name</text>
+          <text class="f" x="24" y="212">format: pdf | xlsx</text>
+          <text class="f" x="24" y="230">sections · chunks</text>
+          <text class="f" x="24" y="248">ids[]  → search chunks</text>
+          <text class="f" x="24" y="266">uploadedAt</text>
+          <text class="s" x="24" y="282">nested in its project</text></g>
+
+        <g class="box" id="d-namespace"><rect x="360" y="26" width="270" height="92" rx="10"/>
+          <text class="t" x="374" y="48">Namespace</text>
+          <text class="f" x="374" y="70">name = project.id</text>
+          <text class="s" x="374" y="90">keeps each project's search</text>
+          <text class="s" x="374" y="106">separate from the others</text></g>
+
+        <g class="box" id="d-chunk"><rect x="360" y="200" width="270" height="140" rx="10"/>
+          <text class="t" x="374" y="222">Search chunk (vector)</text>
+          <text class="f" x="374" y="244">id = {documentId}-{n}</text>
+          <text class="f" x="374" y="262">embedding (numbers)</text>
+          <text class="f" x="374" y="280">documentId · filename</text>
+          <text class="f" x="374" y="298">location · text</text>
+          <text class="s" x="374" y="318">~1000 characters each</text></g>
+
+        <g class="box" id="d-content"><rect x="10" y="328" width="280" height="130" rx="10"/>
+          <text class="t" x="24" y="350">Parsed text file</text>
+          <text class="f" x="24" y="372">named {documentId}.json</text>
+          <text class="s" x="24" y="392">list of sections:</text>
+          <text class="f" x="24" y="412">location: "Page 2" or</text>
+          <text class="f" x="24" y="430">          "Sheet1, row 4"</text>
+          <text class="f" x="24" y="448">text</text></g>
+      </svg>
+      <p class="intro" style="margin:8px 0 0;font-size:13px">No real foreign keys: the app's own code keeps the three stores matching. Chat history and export results are never saved.</p>
+    </section>
+
+    <section class="card">
+      <h2>2. User journey</h2>
+      <div class="flow" id="flow">
+        <div class="step" data-step="create">Create project<small>sidebar</small></div><span class="arrow">→</span>
+        <div class="step" data-step="upload">Import PDF / Excel<small>parse → split → embed → save</small></div><span class="arrow">→</span>
+        <div class="step" data-step="ask">Ask a question<small>search 6 chunks → Gemini → cited answer</small></div>
+        <div class="step" data-step="export">Export fields<small>search + keyword → Gemini → check → file</small></div><span class="arrow">→</span>
+        <div class="step" data-step="delete">Delete document / project<small>index → list → text file</small></div>
+      </div>
+      <h3 style="margin-top:18px">What each step touches</h3>
+      <table class="mono" style="width:100%;border-collapse:collapse;font-size:12px">
+        <tr style="text-align:left;color:var(--muted)"><th>Step</th><th>Project list</th><th>Text files</th><th>Search index</th></tr>
+        <tr><td>Create project</td><td>write</td><td>–</td><td>–</td></tr>
+        <tr><td>Import</td><td>write</td><td>write</td><td>write</td></tr>
+        <tr><td>Ask</td><td>read</td><td>–</td><td>read</td></tr>
+        <tr><td>Export</td><td>read</td><td>read</td><td>read</td></tr>
+        <tr><td>Delete</td><td>write</td><td>delete</td><td>delete</td></tr>
+      </table>
+      <h3 style="margin-top:18px">Activity</h3>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>3. What's stored right now</h2>
+    <div class="stores">
+      <div class="store" id="s-list"><h3>Project list</h3><div class="where">data/projects.json</div><div id="v-list"></div></div>
+      <div class="store" id="s-files"><h3>Parsed text files</h3><div class="where">data/documents/</div><div id="v-files"></div></div>
+      <div class="store" id="s-index"><h3>Search index</h3><div class="where">Pinecone, by namespace</div><div id="v-index"></div></div>
+    </div>
+    <div id="result"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>4. Try it yourself</h2>
+      <div style="margin-bottom:10px"><label class="inline">Project</label><select id="pick-project"></select>
+        <label class="inline" style="margin-left:10px">Document</label><select id="pick-doc"></select></div>
+      <div class="buttons" id="free"></div>
+    </section>
+    <section class="card">
+      <h2>5. Guided walkthroughs</h2>
+      <div class="tabs" id="tabs"></div>
+      <div id="scenario"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+// ---- Pure model: mirrors the real route handlers. No DOM in here. ----
+const SAMPLES = {
+  "Invoice.pdf": { format: "pdf", sections: [
+    { location: "Page 1", text: "Invoice number: INV-7. Invoice date: 12 March 2026. Billed to Acme Ltd." },
+    { location: "Page 2", text: "Line items: 4 chairs, 1 desk. Total amount: $420. Payment due in 30 days." } ] },
+  "Sales.xlsx": { format: "xlsx", sections: [
+    { location: "Sheet1, row 1", text: "A: Region | B: Revenue" },
+    { location: "Sheet1, row 2", text: "A (Region): North | B (Revenue): 1200" },
+    { location: "Sheet1, row 3", text: "A (Region): South | B (Revenue): 900" } ] },
+  "Scanned.pdf": { format: "pdf", sections: [] },
+};
+const CHUNK = 45; // real app: 1000 chars with 200 overlap; small here so you can see the split
+
+function initialState() {
+  return { projects: [], files: {}, index: {}, next: 1, changed: [], result: null, log: [], step: null };
+}
+function split(text) { const out = []; for (let i = 0; i < text.length; i += CHUNK) out.push(text.slice(i, i + CHUNK)); return out; }
+function words(s) { return s.toLowerCase().split(/\W+/).filter((w) => w.length > 2); }
+function clone(s) { return JSON.parse(JSON.stringify(s)); }
+
+function reduce(prev, action) {
+  const s = clone(prev);
+  s.changed = []; s.result = null; s.step = action.type === "deleteDocument" || action.type === "deleteProject" ? "delete" : action.type;
+  const project = s.projects.find((p) => p.id === action.projectId);
+  const say = (text, ok = true) => { s.result = { ok, text, list: s.result?.list }; s.log.unshift(text); };
+
+  switch (action.type) {
+    case "create": {
+      const p = { id: "project-" + s.next++, name: action.name, documents: [], createdAt: "now" };
+      s.projects.push(p); s.changed = ["list", "d-project"];
+      say(`Created project "${p.name}". Only the project list changed; it has no search namespace until a file is imported.`);
+      break;
+    }
+    case "upload": {
+      if (!project) { say("Pick a project first.", false); break; }
+      const sample = SAMPLES[action.filename];
+      const docId = "doc-" + s.next++;
+      if (!sample.sections.length) { say(`"${action.filename}" has no readable text (scanned PDF). Rejected before anything was saved (HTTP 422).`, false); break; }
+      const chunks = []; sample.sections.forEach((sec) => split(sec.text).forEach((t) => chunks.push({ location: sec.location, text: t })));
+      const ids = chunks.map((_, i) => `${docId}-${i}`);
+      const ns = (s.index[project.id] ||= []);
+      chunks.forEach((c, i) => ns.push({ id: ids[i], documentId: docId, filename: action.filename, location: c.location, text: c.text }));
+      if (action.failAfterIndex) {
+        s.index[project.id] = ns.filter((v) => !ids.includes(v.id));
+        if (!s.index[project.id].length) delete s.index[project.id];
+        say(`Indexing "${action.filename}" failed after ${ids.length} chunks were stored. The app deleted those chunks again, so all three stores look exactly as before (HTTP 500).`, false);
+        break;
+      }
+      s.files[docId] = sample.sections;
+      project.documents.push({ id: docId, name: action.filename, format: sample.format, sections: sample.sections.length, chunks: ids.length, ids, uploadedAt: "now" });
+      s.changed = ["list", "files", "index", "d-document", "d-content", "d-chunk", "d-namespace"];
+      say(`Imported "${action.filename}": ${sample.sections.length} sections → ${ids.length} search chunks. All three stores were written, in order: search index, text file, project list.`);
+      break;
+    }
+    case "ask": {
+      if (!project?.documents.length) { say("Import a file into this project first.", false); break; }
+      const q = words(action.question);
+      const hits = (s.index[project.id] || [])
+        .map((v) => ({ v, score: q.filter((w) => v.text.toLowerCase().includes(w)).length }))
+        .filter((h) => h.score > 0 && project.documents.some((d) => d.id === h.v.documentId))
+        .sort((a, b) => b.score - a.score).slice(0, 6);
+      s.changed = ["index", "d-chunk", "d-namespace"];
+      s.result = { ok: true, text: `Q: "${action.question}". ${hits.length ? `Found ${hits.length} matching chunks in this project's namespace; Gemini answers only from these and cites them:` : "No matching chunks, so the answer is “I couldn't find an answer in this project's documents.”"}`,
+        list: hits.map((h, i) => `[${i + 1}] ${h.v.filename}, ${h.v.location}: “${h.v.text}”`) };
+      s.log.unshift(`Asked "${action.question}" (read only, nothing saved)`);
+      break;
+    }
+    case "export": {
+      const doc = project?.documents.find((d) => d.id === action.documentId);
+      if (!doc) { say("Pick a document first.", false); break; }
+      const sections = s.files[doc.id];
+      const rows = action.fields.map((field) => {
+        const sec = sections.find((x) => x.text.toLowerCase().includes(field.toLowerCase() + ":"));
+        const value = sec ? sec.text.slice(sec.text.toLowerCase().indexOf(field.toLowerCase() + ":") + field.length + 1).split(/[.|]/)[0].trim() : "";
+        return `${field} → ${value || "Not found"}${sec ? `  (source: ${sec.location})` : ""}`;
+      });
+      s.changed = ["files", "index", "d-content", "d-chunk"];
+      s.result = { ok: true, text: `Export from "${doc.name}". Values must appear word-for-word in the source text, otherwise “Not found”. Downloaded as a file, nothing saved:`, list: rows };
+      s.log.unshift(`Exported ${action.fields.length} fields from ${doc.name}`);
+      break;
+    }
+    case "deleteDocument": {
+      const doc = project?.documents.find((d) => d.id === action.documentId);
+      if (!doc) { say("Pick a document first.", false); break; }
+      s.index[project.id] = (s.index[project.id] || []).filter((v) => !doc.ids.includes(v.id));
+      if (!s.index[project.id].length) delete s.index[project.id];
+      project.documents = project.documents.filter((d) => d.id !== doc.id);
+      delete s.files[doc.id];
+      s.changed = ["list", "files", "index", "d-document", "d-content", "d-chunk"];
+      say(`Deleted "${doc.name}": its ${doc.ids.length} chunks (found via ids[]), its project-list entry and its text file.`);
+      break;
+    }
+    case "deleteProject": {
+      if (!project) { say("Pick a project first.", false); break; }
+      delete s.index[project.id];
+      project.documents.forEach((d) => delete s.files[d.id]);
+      s.projects = s.projects.filter((p) => p.id !== project.id);
+      s.changed = ["list", "files", "index", "d-project", "d-namespace", "d-document", "d-content", "d-chunk"];
+      say(`Deleted project "${project.name}": whole namespace wiped, then the project entry, then ${project.documents.length} text file(s).`);
+      break;
+    }
+  }
+  return s;
+}
+
+// ---- Page shell ----
+let state = initialState();
+let sel = { projectId: "", documentId: "" };
+const $ = (id) => document.getElementById(id);
+const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+
+function dispatch(action) {
+  const before = new Set([...Object.keys(state.files), ...Object.values(state.index).flat().map((v) => v.id), ...state.projects.flatMap((p) => [p.id, ...p.documents.map((d) => d.id)])]);
+  state = reduce(state, action);
+  state.fresh = before;
+  const p = state.projects.find((x) => x.id === sel.projectId) || state.projects[state.projects.length - 1];
+  sel.projectId = p?.id || "";
+  if (!p?.documents.some((d) => d.id === sel.documentId)) sel.documentId = p?.documents[p.documents.length - 1]?.id || "";
+  render();
+}
+const isNew = (id) => state.fresh && !state.fresh.has(id) ? "new" : "";
+
+function render() {
+  document.querySelectorAll(".box").forEach((b) => b.classList.toggle("hot", state.changed.includes(b.id)));
+  ["list", "files", "index"].forEach((k) => $("s-" + k).classList.toggle("hot", state.changed.includes(k) && state.result?.ok !== false && !["ask", "export"].includes(state.step)));
+  document.querySelectorAll(".step").forEach((el) => el.classList.toggle("hot", el.dataset.step === state.step));
+
+  $("v-list").innerHTML = state.projects.length ? state.projects.map((p) => `<div class="item ${isNew(p.id)}"><b>${esc(p.name)}</b> <span class="k mono">${p.id}</span>
+      ${p.documents.map((d) => `<div class="item ${isNew(d.id)}">📄 ${esc(d.name)} <span class="k">· ${d.format} · ${d.sections} sections · ${d.chunks} chunks</span><br><span class="k mono">${d.id}</span></div>`).join("") || '<div class="empty">no documents</div>'}</div>`).join("")
+    : '<div class="empty">No projects yet</div>';
+  const files = Object.entries(state.files);
+  $("v-files").innerHTML = files.length ? files.map(([id, secs]) => `<div class="item ${isNew(id)}"><span class="mono">${id}.json</span>${secs.map((x) => `<div class="k">${esc(x.location)}: ${esc(x.text.slice(0, 50))}…</div>`).join("")}</div>`).join("")
+    : '<div class="empty">No text files</div>';
+  const ns = Object.entries(state.index);
+  $("v-index").innerHTML = ns.length ? ns.map(([name, vs]) => `<div class="item"><b>namespace</b> <span class="mono">${name}</span>${vs.map((v) => `<div class="item ${isNew(v.id)}"><span class="mono">${v.id}</span> <span class="k">· ${esc(v.location)}</span><br>“${esc(v.text)}”</div>`).join("")}</div>`).join("")
+    : '<div class="empty">Index is empty</div>';
+
+  const r = state.result;
+  $("result").innerHTML = r ? `<div class="result ${r.ok ? "" : "err"}">${esc(r.text)}${r.list?.length ? `<ul>${r.list.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}</div>` : "";
+  $("log").innerHTML = state.log.map((l) => `<div>${esc(l)}</div>`).join("") || '<div class="empty">Nothing yet</div>';
+
+  $("pick-project").innerHTML = state.projects.map((p) => `<option value="${p.id}" ${p.id === sel.projectId ? "selected" : ""}>${esc(p.name)}</option>`).join("") || "<option>none</option>";
+  const docs = state.projects.find((p) => p.id === sel.projectId)?.documents || [];
+  $("pick-doc").innerHTML = docs.map((d) => `<option value="${d.id}" ${d.id === sel.documentId ? "selected" : ""}>${esc(d.name)}</option>`).join("") || "<option>none</option>";
+}
+$("pick-project").onchange = (e) => { sel.projectId = e.target.value; sel.documentId = ""; dispatch({ type: "noop" }); };
+$("pick-doc").onchange = (e) => { sel.documentId = e.target.value; };
+
+const FREE = [
+  ["Create project", () => ({ type: "create", name: "Project " + (state.projects.length + 1) }), "primary"],
+  ["Import Invoice.pdf", () => ({ type: "upload", projectId: sel.projectId, filename: "Invoice.pdf" })],
+  ["Import Sales.xlsx", () => ({ type: "upload", projectId: sel.projectId, filename: "Sales.xlsx" })],
+  ["Import scanned PDF", () => ({ type: "upload", projectId: sel.projectId, filename: "Scanned.pdf" }), "bad"],
+  ["Import fails while indexing", () => ({ type: "upload", projectId: sel.projectId, filename: "Invoice.pdf", failAfterIndex: true }), "bad"],
+  ["Ask: what is the total amount?", () => ({ type: "ask", projectId: sel.projectId, question: "What is the total amount?" })],
+  ["Ask: revenue in North?", () => ({ type: "ask", projectId: sel.projectId, question: "Revenue for North region" })],
+  ["Export: invoice number, total amount, due date", () => ({ type: "export", projectId: sel.projectId, documentId: sel.documentId, fields: ["Invoice number", "Total amount", "Due date"] })],
+  ["Delete selected document", () => ({ type: "deleteDocument", projectId: sel.projectId, documentId: sel.documentId }), "bad"],
+  ["Delete selected project", () => ({ type: "deleteProject", projectId: sel.projectId }), "bad"],
+  ["Reset everything", () => "reset"],
+];
+$("free").innerHTML = FREE.map(([label, , cls], i) => `<button class="${cls || ""}" data-i="${i}">${label}</button>`).join("");
+$("free").onclick = (e) => { const i = e.target.dataset.i; if (i == null) return; const a = FREE[i][1](); if (a === "reset") { state = initialState(); sel = { projectId: "", documentId: "" }; render(); } else dispatch(a); };
+
+const last = () => state.projects[state.projects.length - 1];
+const docOf = (name) => last()?.documents.find((d) => d.name === name)?.id;
+const SCENARIOS = [
+  { name: "Happy path", text: "A user makes a project, imports an invoice, asks a question and exports fields. Watch all three stores fill up on import, and stay unchanged when asking and exporting.", steps: [
+    ["Create project “Accounts”", () => ({ type: "create", name: "Accounts" })],
+    ["Import Invoice.pdf", () => ({ type: "upload", projectId: last().id, filename: "Invoice.pdf" })],
+    ["Ask “What is the total amount?”", () => ({ type: "ask", projectId: last().id, question: "What is the total amount?" })],
+    ["Export invoice number, total amount, due date", () => ({ type: "export", projectId: last().id, documentId: docOf("Invoice.pdf"), fields: ["Invoice number", "Total amount", "Due date"] })] ] },
+  { name: "Import fails halfway", text: "The search index accepts the chunks, then something breaks. Watch for: no leftover chunks, no text file, no document in the list. The rollback keeps the stores matching.", steps: [
+    ["Create project “Fragile”", () => ({ type: "create", name: "Fragile" })],
+    ["Import Invoice.pdf, but indexing breaks", () => ({ type: "upload", projectId: last().id, filename: "Invoice.pdf", failAfterIndex: true })],
+    ["Ask “total amount” (should be refused: no documents)", () => ({ type: "ask", projectId: last().id, question: "total amount" })] ] },
+  { name: "Scanned PDF", text: "A PDF that is only images has no text. It is rejected before anything is written to any store.", steps: [
+    ["Create project “Scans”", () => ({ type: "create", name: "Scans" })],
+    ["Import Scanned.pdf", () => ({ type: "upload", projectId: last().id, filename: "Scanned.pdf" })] ] },
+  { name: "Two files, delete one", text: "Two documents share one namespace. Deleting one removes only its own chunks (found through its ids[] list). Then asking about it finds nothing.", steps: [
+    ["Create project “Mixed”", () => ({ type: "create", name: "Mixed" })],
+    ["Import Invoice.pdf", () => ({ type: "upload", projectId: last().id, filename: "Invoice.pdf" })],
+    ["Import Sales.xlsx", () => ({ type: "upload", projectId: last().id, filename: "Sales.xlsx" })],
+    ["Delete Invoice.pdf", () => ({ type: "deleteDocument", projectId: last().id, documentId: docOf("Invoice.pdf") })],
+    ["Ask “What is the total amount?”", () => ({ type: "ask", projectId: last().id, question: "What is the total amount?" })] ] },
+  { name: "Projects stay separate", text: "Two projects each get their own namespace. Asking in project B never sees project A's invoice. Deleting B wipes only B.", steps: [
+    ["Create project “A”", () => ({ type: "create", name: "A" })],
+    ["Import Invoice.pdf into A", () => ({ type: "upload", projectId: last().id, filename: "Invoice.pdf" })],
+    ["Create project “B”", () => ({ type: "create", name: "B" })],
+    ["Import Sales.xlsx into B", () => ({ type: "upload", projectId: last().id, filename: "Sales.xlsx" })],
+    ["Ask B “What is the total amount?”", () => ({ type: "ask", projectId: last().id, question: "What is the total amount?" })],
+    ["Delete project B", () => ({ type: "deleteProject", projectId: last().id })] ] },
+];
+let tab = 0, done = 0;
+function renderScenario() {
+  $("tabs").innerHTML = SCENARIOS.map((sc, i) => `<button class="${i === tab ? "on" : ""}" data-t="${i}">${sc.name}</button>`).join("");
+  const sc = SCENARIOS[tab];
+  $("scenario").innerHTML = `<p>${sc.text}</p><button data-start>Start (resets everything)</button><ol class="steps">${sc.steps.map(([l], i) =>
+    `<li class="${i < done ? "done" : ""}"><button class="${i === done ? "primary" : ""}" data-s="${i}" ${i === done ? "" : "disabled"}>${l}</button></li>`).join("")}</ol>`;
+}
+$("tabs").onclick = (e) => { if (e.target.dataset.t == null) return; tab = +e.target.dataset.t; startScenario(); };
+$("scenario").onclick = (e) => {
+  if (e.target.hasAttribute("data-start")) return startScenario();
+  const i = e.target.dataset.s; if (i == null) return;
+  dispatch(SCENARIOS[tab].steps[i][1]()); done++; renderScenario();
+};
+function startScenario() { state = initialState(); sel = { projectId: "", documentId: "" }; done = 0; render(); renderScenario(); }
+
+render(); renderScenario();
+</script>
+</body>
+</html>
