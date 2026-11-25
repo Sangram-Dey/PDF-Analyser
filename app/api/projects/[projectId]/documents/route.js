@@ -1,95 +1,52 @@
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
-import { getProject, updateProjects } from "../../../../../lib/projects";
-import { getVectorStore } from "../../../../../lib/vectorStore";
-import {
-  documentFormat,
-  parseDocument,
-  saveDocumentContent,
-  removeDocumentContent,
-} from "../../../../../lib/documentContent";
+import { startUpload, MAX_FILE_BYTES } from "@/lib/services/documents";
+import { requireUserId } from "@/lib/auth";
+import { HttpError, readFormData, toErrorResponse } from "@/lib/http";
 
 export const runtime = "nodejs";
 
+const MAX_REQUEST_BYTES = MAX_FILE_BYTES + 1024 * 1024; // the file plus room for the form wrapper
+const FAILED = "Could not upload this document.";
+
+// Streams the upload's progress as newline-delimited JSON, like /api/rag:
+//   {"type":"progress","stage":"reading"|"splitting"|"embedding"|"saving",…} … then {"type":"done","document"} or {"type":"error","message"}
 export async function POST(request, { params }) {
-  const project = await getProject(params.projectId);
-  if (!project)
-    return Response.json({ error: "Project not found." }, { status: 404 });
-  const form = await request.formData();
-  const file = form.get("file");
-  if (!(file instanceof File) || !documentFormat(file.name))
-    return Response.json(
-      { error: "Choose a PDF or Excel (.xlsx) file." },
-      { status: 400 },
-    );
-  if (file.size > 10 * 1024 * 1024)
-    return Response.json(
-      { error: "Files must be 10 MB or smaller." },
-      { status: 400 },
-    );
-  const documentId = crypto.randomUUID();
-  let ids = [];
+  let ingest;
   try {
-    const { format, sections } = await parseDocument(file);
-    const splitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 1000,
-      chunkOverlap: 200,
-    });
-    const chunks = await splitter.splitDocuments(
-      sections.map((section) => ({
-        pageContent: section.text,
-        metadata: { location: section.location },
-      })),
-    );
-    ids = chunks.map((_, index) => `${documentId}-${index}`);
-    const store = await getVectorStore(project.id);
-    await store.addDocuments(
-      chunks.map((chunk) => ({
-        pageContent: chunk.pageContent,
-        metadata: {
-          documentId,
-          filename: file.name,
-          location: chunk.metadata.location,
-        },
-      })),
-      { ids },
-    );
-    await saveDocumentContent(documentId, sections);
-    const document = {
-      id: documentId,
-      name: file.name,
-      format,
-      sections: sections.length,
-      chunks: chunks.length,
-      ids,
-      uploadedAt: new Date().toISOString(),
-    };
-    await updateProjects((projects) => {
-      const current = projects.find((item) => item.id === project.id);
-      if (!current) throw new Error("Project was removed during upload.");
-      current.documents.push(document);
-    });
-    return Response.json({ document }, { status: 201 });
+    const userId = await requireUserId(); // checked before the body is read, so anonymous uploads are never parsed
+    const form = await readFormData(request, MAX_REQUEST_BYTES);
+    ingest = await startUpload(userId, params.projectId, form.get("file"));
   } catch (error) {
-    if (ids.length) {
-      try {
-        await (await getVectorStore(project.id)).delete({ ids });
-      } catch (cleanupError) {
-        console.error("Upload cleanup failed", cleanupError);
-      }
-    }
-    try {
-      await removeDocumentContent(documentId);
-    } catch (cleanupError) {
-      console.error("Document cleanup failed", cleanupError);
-    }
-    console.error(error);
-    return Response.json(
-      {
-        error: ids.length
-          ? "Could not index this document. Check the AI service configuration."
-          : error.message || "Could not parse this document.",
-      },
-      { status: ids.length ? 500 : 422 },
-    );
+    return toErrorResponse(error, FAILED);
   }
+
+  const encoder = new TextEncoder();
+  const body = new ReadableStream({
+    async start(controller) {
+      const send = (event) => {
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        } catch {
+          // the browser went away; indexing still finishes, so the document appears on the next refresh
+        }
+      };
+      try {
+        const document = await ingest((progress) => send({ type: "progress", ...progress }));
+        send({ type: "done", document });
+      } catch (error) {
+        // Headers are already sent, so a failure becomes an "error" event instead of a status code.
+        if (!(error instanceof HttpError)) console.error("Upload failed", error);
+        send({ type: "error", message: error instanceof HttpError ? error.message : FAILED });
+      }
+      try {
+        controller.close();
+      } catch {
+        // already closed
+      }
+    },
+  });
+
+  return new Response(body, {
+    status: 201,
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" },
+  });
 }

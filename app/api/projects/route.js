@@ -1,14 +1,26 @@
-import { getProjects, updateProjects } from "../../../lib/projects";
+import { listProjects, createProject } from "@/lib/services/projects";
+import { requireUserId } from "@/lib/auth";
+import { readJson, toErrorResponse } from "@/lib/http";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic"; // always read fresh data, never a cached build-time copy
 
-export async function GET() { return Response.json({ projects: await getProjects() }); }
+export async function GET() {
+  try {
+    const projects = await listProjects(await requireUserId());
+    return Response.json({ projects });
+  } catch (error) {
+    return toErrorResponse(error, "Could not load projects.");
+  }
+}
 
 export async function POST(request) {
-  const { name } = await request.json();
-  const cleanName = typeof name === "string" ? name.trim() : "";
-  if (!cleanName || cleanName.length > 80) return Response.json({ error: "Enter a project name of up to 80 characters." }, { status: 400 });
-  const project = { id: crypto.randomUUID(), name: cleanName, documents: [], createdAt: new Date().toISOString() };
-  await updateProjects((projects) => projects.push(project));
-  return Response.json({ project }, { status: 201 });
+  try {
+    const userId = await requireUserId();
+    const { name } = await readJson(request);
+    const project = await createProject(userId, name);
+    return Response.json({ project }, { status: 201 });
+  } catch (error) {
+    return toErrorResponse(error, "Could not create the project.");
+  }
 }
