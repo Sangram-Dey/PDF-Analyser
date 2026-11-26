@@ -96,7 +96,7 @@ test("models enforce the schema and return the shape the UI reads", async () => 
   const document = new Document({ projectId: project._id, name: "a.pdf", format: "pdf", chunks: 3 });
   const json = toProjectJson(project, [document]);
   assert.equal(json.id, project._id);
-  assert.deepEqual(Object.keys(json.documents[0]), ["id", "name", "format", "chunks", "size", "suggestions", "hasFile", "uploadedAt"]);
+  assert.deepEqual(Object.keys(json.documents[0]), ["id", "name", "format", "chunks", "size", "suggestions", "fields", "hasFile", "uploadedAt"]);
   assert.deepEqual(vectorIdsFor("doc", 3), ["doc-0", "doc-1", "doc-2"]);
 });
 
@@ -258,4 +258,19 @@ test("starter questions: one per line, numbering removed, non-questions dropped"
   const reply = "1. How do I analyze domains?\n- What are Analysis Options?\n\nHere you go:\n• Where do cached results come from?\n4) A fourth one?";
   assert.deepEqual(parseSuggestions(reply), ["How do I analyze domains?", "What are Analysis Options?", "Where do cached results come from?"]);
   assert.deepEqual(parseSuggestions(""), []);
+});
+
+test("export field suggestions: names only, numbering and values removed, no duplicates", async () => {
+  const { parseFields } = await import("../lib/rag/answer.js");
+  const reply = "1. Invoice number\n- Due date: 2026-12-02\n• Total amount\nTotal amount\nWhat is due?\n\nVendor";
+  assert.deepEqual(parseFields(reply), ["Invoice number", "Due date", "Total amount", "Vendor"]);
+  assert.deepEqual(parseFields(""), []);
+});
+
+test("widget allowed websites: turned into exact site addresses, anything else refused", async () => {
+  const { parseOrigins } = await import("../lib/services/widget.js");
+  assert.deepEqual(parseOrigins("localhost:5173\nhttps://shop.com/page?x=1\nhttps://shop.com"), ["http://localhost:5173", "https://shop.com"]);
+  assert.throws(() => parseOrigins("javascript:alert(1)"), /isn't a website address/);
+  assert.throws(() => parseOrigins("ftp://files.example.com"), /isn't a website address/);
+  assert.deepEqual(parseOrigins(""), []);
 });

@@ -12,3 +12,4 @@ export async function DELETE(request, { params }) {
     return toErrorResponse(error, "Could not remove this document.");
   }
 }
+

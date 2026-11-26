@@ -1,12 +1,12 @@
-import { FileOutput } from "lucide-react";
+import { Code2, FileOutput } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDelete } from "./ConfirmDelete";
 
-export function ProjectHeader({ project, busy, onExport, onDelete }) {
+export function ProjectHeader({ project, busy, onExport, onEmbed, onDelete }) {
   const count = project?.documents.length ?? 0;
 
   return (
-    <header className="flex items-center justify-between gap-5 border-b bg-card px-5 py-5 sm:px-9 sm:py-6">
+    <header data-robot-hide data-robot-spot="header" className="flex items-center justify-between gap-5 border-b bg-card px-5 py-5 sm:px-9 sm:py-6">
       <div className="min-w-0">
         <p className="mb-1.5 text-[10px] font-bold tracking-widest text-primary">WORKSPACE</p>
         <h1 className="break-words text-xl font-bold sm:text-2xl">{project?.name || "Projects"}</h1>
@@ -19,6 +19,12 @@ export function ProjectHeader({ project, busy, onExport, onDelete }) {
           <Button variant="outline" size="sm" onClick={onExport} disabled={!count}>
             <FileOutput />
             Export data
+          </Button>
+        )}
+        {project && (
+          <Button variant="outline" size="sm" onClick={onEmbed} title="Add this project's chat to your website">
+            <Code2 />
+            Embed
           </Button>
         )}
         {project && (

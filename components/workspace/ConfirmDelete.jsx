@@ -6,10 +6,11 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 // A trash icon button that asks before deleting. Used for projects and documents.
 // loading: the delete is running (the dialog has closed), so the button spins until it finishes.
-export function ConfirmDelete({ label, title, description, disabled, loading = false, onConfirm }) {
+export function ConfirmDelete({ label, title, description, disabled, loading = false, onConfirm, className }) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -20,7 +21,7 @@ export function ConfirmDelete({ label, title, description, disabled, loading = f
           aria-label={loading ? "Deleting…" : label}
           aria-busy={loading}
           disabled={disabled || loading}
-          className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          className={cn("shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive", className)}
         >
           {loading ? <Loader2 className="animate-spin text-destructive motion-reduce:animate-none" /> : <Trash2 />}
         </Button>

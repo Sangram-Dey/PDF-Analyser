@@ -9,7 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-const SUGGESTED_FIELDS = ["Invoice number", "Invoice date", "Due date", "Vendor", "Customer", "Total amount"];
+// Used for files uploaded before field suggestions existed; newer files suggest their own (document.fields).
+const GENERAL_FIELDS = ["Invoice number", "Invoice date", "Due date", "Vendor", "Customer", "Total amount"];
 const EYEBROW = "text-[10px] font-bold tracking-widest";
 
 function fieldList(text) {
@@ -94,6 +95,8 @@ function ResultsTable({ rows }) {
   );
 }
 
+const keepOpenForRobot = (event) => event.target?.closest?.("[data-robot]") && event.preventDefault();
+
 export function ExportSheet({ open, onOpenChange, documents, busy, onPreview, onDownload }) {
   const [documentId, setDocumentId] = useState("");
   const [fieldsText, setFieldsText] = useState("");
@@ -102,6 +105,9 @@ export function ExportSheet({ open, onOpenChange, documents, busy, onPreview, on
   // Falls back to the first document when nothing (or a deleted one) is chosen.
   const chosenId = documents.some((doc) => doc.id === documentId) ? documentId : documents[0]?.id || "";
   const fields = fieldList(fieldsText);
+  // fields written for this file at upload (lib/rag/answer.js → suggestForDocument), like the chat's starter questions
+  const fileFields = documents.find((doc) => doc.id === chosenId)?.fields ?? [];
+  const suggestedFields = fileFields.length ? fileFields : GENERAL_FIELDS;
   const extracting = busy === "export";
   const downloading = busy === "download";
 
@@ -142,8 +148,14 @@ export function ExportSheet({ open, onOpenChange, documents, busy, onPreview, on
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-xl">
-        <SheetHeader className="border-b px-6 py-5 text-left">
+      <SheetContent
+        className="flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-xl"
+        // the robot helps beside the drawer: touching or dragging it mustn't close the drawer
+        onPointerDownOutside={keepOpenForRobot}
+        onInteractOutside={keepOpenForRobot}
+      >
+        {/* data-robot-spot: the robot stands beside the drawer while it extracts and packs your file */}
+        <SheetHeader data-robot-spot="export" className="border-b px-6 py-5 text-left">
           <p className={cn(EYEBROW, "text-primary")}>DOCUMENT TOOLS</p>
           <SheetTitle>Export extracted data</SheetTitle>
           <SheetDescription>Pick the fields you need. Each value is checked word for word against the document.</SheetDescription>
@@ -173,19 +185,22 @@ export function ExportSheet({ open, onOpenChange, documents, busy, onPreview, on
               maxLength={1600}
               disabled={!!busy || !documents.length}
             />
-            <p className="text-[11px] text-muted-foreground">One field per line, up to 20. Or add a suggestion:</p>
+            <p className="text-[11px] text-muted-foreground">
+              One field per line, up to 20. Or add {fileFields.length ? "a field found in this file" : "a suggestion"}:
+            </p>
             <div className="flex flex-wrap gap-1.5">
-              {SUGGESTED_FIELDS.map((field) => {
+              {suggestedFields.map((field, index) => {
                 const added = fields.includes(field);
                 return (
                   <Button
-                    key={field}
+                    key={`${chosenId}-${field}`}
                     type="button"
                     variant="outline"
                     size="sm"
                     disabled={!!busy || added}
                     onClick={() => addField(field)}
-                    className="h-7 rounded-full px-2.5 text-xs font-normal hover:border-primary hover:text-primary"
+                    style={{ animationDelay: `${index * 60}ms` }} // they arrive one after another, like the chat's chips
+                    className="h-7 rounded-full px-2.5 text-xs font-normal hover:border-primary hover:text-primary animate-in fade-in slide-in-from-bottom-1 fill-mode-both duration-300 motion-reduce:animate-none"
                   >
                     {added ? <Check /> : <Plus />}
                     {field}
@@ -196,13 +211,14 @@ export function ExportSheet({ open, onOpenChange, documents, busy, onPreview, on
           </div>
 
           <Button type="submit" disabled={!!busy || !chosenId || !fields.length} className="justify-self-start">
-            {extracting ? <Loader2 className="animate-spin" /> : <Sparkles />}
+            {extracting ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <Sparkles />}
             {extracting ? "Extracting..." : "Extract fields"}
           </Button>
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         </form>
 
-        <div className="flex-1 border-t bg-muted/30 px-6 py-5" aria-live="polite">
+        {/* data-robot-spot: while extracting, the robot works here, next to the values as they're found */}
+        <div data-robot-spot="export-extract" className="flex-1 border-t bg-muted/30 px-6 py-5" aria-live="polite">
           {extracting ? (
             <ExtractingTable fields={fields} />
           ) : result ? (
@@ -213,9 +229,10 @@ export function ExportSheet({ open, onOpenChange, documents, busy, onPreview, on
         </div>
 
         {result && !extracting && (
-          <div className="flex flex-wrap gap-2 border-t px-6 py-4">
+          // data-robot-spot: while packing the download, the robot works here, next to the download buttons
+          <div data-robot-spot="export-download" className="flex flex-wrap gap-2 border-t px-6 py-4">
             <Button onClick={() => download("xlsx")} disabled={!!busy}>
-              {downloading ? <Loader2 className="animate-spin" /> : <FileSpreadsheet />}
+              {downloading ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <FileSpreadsheet />}
               Download Excel
             </Button>
             <Button variant="outline" onClick={() => download("pdf")} disabled={!!busy}>

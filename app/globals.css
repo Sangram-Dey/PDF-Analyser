@@ -2,40 +2,85 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Sourcework theme for shadcn/ui. Values are "hue saturation lightness" so Tailwind can add opacity (bg-primary/10). */
+/* Sourcework "RAG Lab" theme for shadcn/ui: a dark charcoal lab with neon cyan/teal light.
+   Values are "hue saturation lightness" so Tailwind can add opacity (bg-primary/10).
+   Every component reads these, so the whole app follows this one palette. */
 @layer base {
   :root {
-    --background: 200 14% 97%;          /* #f5f7f8 page */
-    --foreground: 197 38% 15%;          /* #172b33 slate text */
-    --card: 0 0% 100%;
-    --card-foreground: 197 38% 15%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 197 38% 15%;
-    --primary: 173 69% 29%;             /* #177f73 teal */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 167 33% 95%;           /* #edf6f4 teal tint */
-    --secondary-foreground: 173 76% 24%;
-    --muted: 190 14% 95%;
-    --muted-foreground: 190 12% 41%;    /* #5d7276, 4.9:1 on white */
-    --accent: 167 33% 95%;
-    --accent-foreground: 197 38% 15%;
-    --destructive: 356 47% 42%;         /* #9e3940 */
+    --background: 200 18% 6%;           /* #0d1213 lab floor */
+    --foreground: 190 20% 92%;          /* #e6eef0 text */
+    --card: 200 16% 9%;                 /* #131a1c panels */
+    --card-foreground: 190 20% 92%;
+    --popover: 200 16% 10%;
+    --popover-foreground: 190 20% 92%;
+    --primary: 178 85% 45%;             /* #11d4c4 neon teal: buttons, links, citations */
+    --primary-foreground: 200 30% 6%;   /* dark text on the bright buttons (high contrast) */
+    --secondary: 185 40% 13%;           /* #14292b dark teal tint */
+    --secondary-foreground: 178 75% 68%;
+    --muted: 200 14% 13%;
+    --muted-foreground: 195 12% 63%;    /* #93a3a8, ~6:1 on the panels */
+    --accent: 185 40% 13%;
+    --accent-foreground: 190 20% 92%;
+    --destructive: 356 75% 62%;         /* #e8566a, readable as text on dark */
     --destructive-foreground: 0 0% 100%;
-    --warning: 33 100% 27%;             /* #8a4b00 "processing" text */
-    --warning-foreground: 36 89% 93%;   /* #fdf1df "processing" background */
-    --border: 186 15% 88%;              /* #dde5e6 */
-    --input: 186 15% 82%;
-    --ring: 171 46% 57%;                /* #5fc4b5 focus ring / AI glow */
-    --glow: 171 46% 57%;
-    --sidebar: 197 38% 15%;
-    --sidebar-foreground: 180 20% 93%;
-    --sidebar-muted: 188 12% 67%;
-    --sidebar-active: 192 27% 22%;
+    --warning: 38 95% 62%;              /* amber "processing" text */
+    --warning-foreground: 35 60% 14%;   /* dark amber "processing" background */
+    --border: 195 18% 18%;              /* hairlines between lab panels */
+    --input: 195 18% 22%;
+    --ring: 182 90% 55%;                /* #1fe5f0 cyan focus ring */
+    --glow: 182 90% 55%;                /* cyan light: scans, pipelines, glows */
+    --sidebar: 205 22% 4%;              /* darker than the floor, so the sidebar frames the lab */
+    --sidebar-foreground: 190 20% 92%;
+    --sidebar-muted: 195 12% 60%;
+    --sidebar-active: 195 25% 13%;
+    --sidebar-accent: 182 90% 55%;      /* accent text on the dark panels: the cyan glow (light mode uses amber) */
     --radius: 0.75rem;
   }
+  /* Light mode, "Monochrome + teal": white paper, near-black ink and buttons, and teal used only where the AI
+     shows you something: citations, sources, the robot, scans and the vault. Teal is the one colour shared with
+     the dark mode, so both modes match and teal keeps one meaning.
+     Chosen by data-theme on <html> (app/layout.js sets it before the page paints; the sidebar toggle switches it).
+     Every text pair meets WCAG AA (4.5:1); --glow also reads as small text (5.2:1 on paper). */
+  :root[data-theme="light"] {
+    --background: 60 9% 98%;            /* #fafaf9 paper */
+    --foreground: 240 6% 10%;           /* #18181b ink, 17:1 */
+    --card: 0 0% 100%;                  /* #ffffff */
+    --card-foreground: 240 6% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 6% 10%;
+    --primary: 240 6% 10%;              /* #18181b black buttons and links */
+    --primary-foreground: 60 9% 98%;    /* 17:1 */
+    --secondary: 167 85% 89%;           /* #ccfbf1 teal tint: citation chips, "In chat", highlights */
+    --secondary-foreground: 176 69% 22%; /* #115e59, 6.7:1 */
+    --muted: 240 5% 96%;                /* #f4f4f5 */
+    --muted-foreground: 240 5% 39%;     /* #5f5f68, 6:1 on paper */
+    --accent: 240 5% 96%;
+    --accent-foreground: 240 6% 10%;
+    --destructive: 4 76% 40%;           /* #b42318 */
+    --destructive-foreground: 60 9% 98%;
+    --warning: 32 81% 29%;              /* #854d0e amber "processing" text */
+    --warning-foreground: 48 96% 89%;   /* #fef3c7 amber "processing" background */
+    --border: 60 4% 89%;                /* #e4e4e2 */
+    --input: 60 2% 83%;
+    --ring: 175 77% 26%;                /* #0f766e teal focus ring */
+    --glow: 175 77% 26%;                /* teal: robot eyes, scans, the vault (the dark mode's cyan, inked) */
+    --sidebar: 240 6% 10%;              /* #18181b black panel */
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-muted: 240 5% 65%;        /* #a1a1aa, 6.9:1 */
+    --sidebar-active: 240 4% 16%;       /* #27272a */
+    --sidebar-accent: 172 66% 50%;      /* #2dd4bf bright teal: accent text on the black panel, 9.5:1 */
+  }
   * { @apply border-border; }
-  :root { color-scheme: light; }
-  body { @apply bg-background text-sm text-foreground; }
+  :root { color-scheme: dark; }
+  :root[data-theme="light"] { color-scheme: light; }
+  body {
+    @apply bg-background text-sm text-foreground;
+    /* a faint blueprint grid, only visible where no panel covers the floor */
+    background-image:
+      linear-gradient(hsl(var(--glow) / 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--glow) / 0.035) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
 
   /* Safety net for people who ask for less motion: stop anything a class missed, and scroll instantly. */
   @media (prefers-reduced-motion: reduce) {

@@ -1,4 +1,4 @@
-import { startUpload, MAX_FILE_BYTES } from "@/lib/services/documents";
+import { startUpload, MAX_FILE_BYTES, MAX_FILE_MB } from "@/lib/services/documents";
 import { requireUserId } from "@/lib/auth";
 import { HttpError, readFormData, toErrorResponse } from "@/lib/http";
 
@@ -13,7 +13,7 @@ export async function POST(request, { params }) {
   let ingest;
   try {
     const userId = await requireUserId(); // checked before the body is read, so anonymous uploads are never parsed
-    const form = await readFormData(request, MAX_REQUEST_BYTES);
+    const form = await readFormData(request, MAX_REQUEST_BYTES, `Files must be ${MAX_FILE_MB} MB or smaller.`);
     ingest = await startUpload(userId, params.projectId, form.get("file"));
   } catch (error) {
     return toErrorResponse(error, FAILED);

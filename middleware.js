@@ -14,9 +14,11 @@ export default clerkMiddleware(
 );
 
 export const config = {
-  // Every route except Next.js internals and static files (Clerk's recommended matcher).
+  // Every route except Next.js internals, static files (Clerk's recommended matcher), and the public website
+  // widget: its chat page (/embed/…) and API (/api/widget/…) need no account, and skipping sign-in entirely avoids
+  // sign-in redirects inside other sites' iframes. (/widget.js is a static file, so it's already skipped.)
   matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    "/(api|trpc)(.*)",
+    "/((?!_next|embed|api/widget|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/(api(?!/widget)|trpc)(.*)",
   ],
 };

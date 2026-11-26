@@ -2,57 +2,24 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { BookOpen, Check, ChevronRight, Circle, FileText, Loader2, Send, Sparkles } from "lucide-react";
+import { BookOpen, ChevronRight, FileText, Send, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { linkCitations } from "@/lib/citations";
+import { VAULT_LOCK_MS, VaultLoader } from "./VaultLoader";
 import { cn } from "@/lib/utils";
 
 const STARTER_QUESTIONS = ["Summarize the key points", "What dates or deadlines are mentioned?", "List every amount and total"];
-const STAGES = ["searching", "reading", "writing"]; // set by the streamed answer (hooks/useWorkspace.js)
 const EYEBROW = "mb-2 text-[10px] font-bold tracking-widest";
 const ENTER = "animate-in fade-in slide-in-from-bottom-2 duration-300 motion-reduce:animate-none";
 
 // Smooth scrolling unless the user asked for less motion.
 const scrollBehavior = () => (window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
 
-// Shown until the first words arrive. Each step ticks when the server reports it (real progress, not a timer).
-function ThinkingSteps({ stage, sourceCount }) {
-  const step = STAGES.indexOf(stage);
-  const labels = [
-    "Searching your documents",
-    sourceCount ? `Reading ${sourceCount} relevant passage${sourceCount === 1 ? "" : "s"}` : "Reading the most relevant passages",
-    "Writing an answer with citations",
-  ];
-
-  return (
-    <div role="status" className={cn("mb-6 rounded-lg border border-glow/40 bg-secondary/60 px-4 py-3.5", ENTER)}>
-      <p className={cn(EYEBROW, "flex items-center gap-1.5 text-primary")}>
-        <Sparkles className="size-3.5 motion-safe:animate-pulse" />
-        THINKING
-      </p>
-      <ol className="space-y-1.5 text-xs">
-        {labels.map((label, index) => (
-          <li key={label} className={cn("flex items-center gap-2", index > step && "text-muted-foreground/60")}>
-            {index < step ? (
-              <Check className="size-3.5 text-primary" />
-            ) : index === step ? (
-              <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
-            ) : (
-              <Circle className="size-3.5" />
-            )}
-            {label}
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
-}
-
 function SuggestionChips({ label, questions, disabled, onAsk, centered = false }) {
   return (
-    <div className="mt-4">
+    <div className="mt-4 w-full"> {/* full width, so the chips wrap in narrow windows (the website widget) */}
       <p className={cn(EYEBROW, "text-muted-foreground")}>{label}</p>
       <div className={cn("flex flex-wrap gap-2", centered && "justify-center")}>
         {questions.map((question, index) => (
@@ -73,12 +40,26 @@ function SuggestionChips({ label, questions, disabled, onAsk, centered = false }
   );
 }
 
-function Message({ message, isLatest, busy, onAsk }) {
+function Message({ message, isLatest, busy, onAsk, documentChunks, showSources = true }) {
   const isUser = message.role === "user";
   const sources = message.sources ?? [];
   const id = useId();
   const [openSources, setOpenSources] = useState([]);
   const [highlighted, setHighlighted] = useState(null);
+
+  // Before any words arrive, the answer is the vault loader. When the first words come, the vault shuts and
+  // locks for a moment, then the answer fades in (the words keep streaming in meanwhile, nothing is lost).
+  const loading = !isUser && !!message.stage && !message.text;
+  const [locking, setLocking] = useState(false);
+  const wasLoading = useRef(loading);
+  useEffect(() => {
+    const finished = wasLoading.current && !loading;
+    wasLoading.current = loading;
+    if (!finished) return;
+    setLocking(true);
+    const timer = setTimeout(() => setLocking(false), VAULT_LOCK_MS);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   function setSourceOpen(number, open) {
     setOpenSources((current) => (open ? [...current, number] : current.filter((item) => item !== number)));
@@ -109,14 +90,11 @@ function Message({ message, isLatest, busy, onAsk }) {
     },
   };
 
-  // Before any words arrive, the answer is just its progress card.
-  if (!isUser && message.stage && !message.text) {
-    return <ThinkingSteps stage={message.stage} sourceCount={sources.length} />;
-  }
+  if (loading || locking) return <VaultLoader stage={locking ? "locking" : message.stage} sources={sources} total={documentChunks} />;
   const writing = message.stage === "writing";
 
   return (
-    <article className={cn("mb-6", ENTER, isUser && "rounded-lg bg-muted px-4 py-3.5")}>
+    <article className={cn("mb-6", ENTER, isUser ? "rounded-lg bg-muted px-4 py-3.5" : "duration-500")}>
       <p className={cn(EYEBROW, "flex items-center gap-1.5 text-primary")}>
         {!isUser && <Sparkles className={cn("size-3.5", writing && "motion-safe:animate-pulse")} />}
         {/* Typing shimmer: a light band sweeps across the label while words stream in. */}
@@ -140,7 +118,7 @@ function Message({ message, isLatest, busy, onAsk }) {
         {isUser ? message.text : <ReactMarkdown components={markdownComponents}>{linkCitations(message.text, sources.length)}</ReactMarkdown>}
       </div>
 
-      {sources.length > 0 && (
+      {showSources && sources.length > 0 && (
         <div className="mt-4 border-t pt-3">
           <p className={cn(EYEBROW, "text-muted-foreground")}>SOURCES</p>
           {sources.map((source) => (
@@ -177,10 +155,18 @@ function Message({ message, isLatest, busy, onAsk }) {
   );
 }
 
-export function ChatPanel({ messages, busy, hasDocuments, documentName, suggestions = [], onAsk }) {
+// onTypingChange(true/false): tells the page whether a question is being typed, so the lab robot can come and listen.
+// embedded: the website widget's version (components/embed/EmbedChat.jsx): no header (the widget draws its own),
+// and sources can be hidden by the owner (showSources).
+export function ChatPanel({ messages, busy, hasDocuments, documentName, documentChunks, suggestions = [], onAsk, onTypingChange, embedded = false, showSources = true }) {
   const [question, setQuestion] = useState("");
   const logRef = useRef(null);
   const answering = busy === "answer";
+  const typing = !!question.trim();
+
+  useEffect(() => {
+    onTypingChange?.(typing);
+  }, [typing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Scroll only the message list (scrollIntoView would also scroll the whole page, e.g. during uploads).
   useEffect(() => {
@@ -196,21 +182,29 @@ export function ChatPanel({ messages, busy, hasDocuments, documentName, suggesti
   }
 
   return (
-    <section aria-labelledby="chat-title" className="flex min-h-0 min-w-0 flex-col bg-card">
-      <div className="border-b px-5 py-5 sm:px-8 sm:py-6">
-        <h2 id="chat-title" className="text-base font-bold">Ask your documents</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Answers come from the file marked &ldquo;In chat&rdquo;, with every claim linked to its source.</p>
-      </div>
+    <section aria-labelledby={embedded ? undefined : "chat-title"} aria-label={embedded ? "Chat" : undefined} data-robot-hide className={cn("flex min-h-0 min-w-0 flex-col bg-card", embedded && "flex-1")}>
+      {!embedded && (
+        // data-robot-drop: the robot sometimes drops down into the chat from behind this header (AiRobot.jsx)
+        <div data-robot-drop className="border-b px-5 py-5 sm:px-8 sm:py-6">
+          <h2 id="chat-title" className="text-base font-bold">Ask your documents</h2>
+          <p className="mt-1 text-xs text-muted-foreground">Answers come from the file marked &ldquo;In chat&rdquo;, with every claim linked to its source.</p>
+        </div>
+      )}
 
-      <div ref={logRef} role="log" aria-live="polite" className="min-h-[300px] flex-1 overflow-y-auto px-5 py-6 sm:px-8 lg:max-h-[calc(100vh-250px)]">
+      <div
+        ref={logRef}
+        role="log"
+        aria-live="polite"
+        className={cn("flex-1 overflow-y-auto px-5 py-6", embedded ? "min-h-0" : "min-h-[300px] sm:px-8 lg:max-h-[calc(100vh-250px)]")}
+      >
         {messages.length ? (
           // Only the selected file's conversation is passed in (hooks/useWorkspace.js), so each file has its own screen.
           messages.map((message, index) => (
-            <Message key={`${message.documentId}-${index}`} message={message} isLatest={index === messages.length - 1} busy={busy} onAsk={onAsk} />
+            <Message key={`${message.documentId}-${index}`} message={message} isLatest={index === messages.length - 1} busy={busy} onAsk={onAsk} documentChunks={documentChunks} showSources={showSources} />
           ))
         ) : (
           <div className="flex h-full min-h-[300px] flex-col items-center justify-center text-center">
-            <span className="mb-3.5 grid size-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-glow text-white shadow-[0_0_24px_hsl(var(--glow)/0.45)]">
+            <span className="mb-3.5 grid size-11 place-items-center rounded-xl bg-gradient-to-br from-primary to-glow text-primary-foreground shadow-[0_0_24px_hsl(var(--glow)/0.45)]">
               <BookOpen className="size-5" />
             </span>
             <h3 className="max-w-full truncate px-4 font-semibold">{documentName ? `Ask about ${documentName}` : "Ask a question"}</h3>
@@ -235,6 +229,7 @@ export function ChatPanel({ messages, busy, hasDocuments, documentName, suggesti
       )}
       <form
         onSubmit={submit}
+        data-robot-spot="chat" // the robot comes here while you ask and it answers
         className={cn(
           "mx-5 mb-5 flex rounded-lg border bg-card p-1.5 shadow-sm transition-shadow focus-within:border-primary focus-within:shadow-[0_0_0_3px_hsl(var(--glow)/0.25),0_0_24px_hsl(var(--glow)/0.25)] sm:mx-6 sm:mb-6",
           // While answering, the box glows and breathes (a steady glow if motion is reduced).
@@ -243,7 +238,7 @@ export function ChatPanel({ messages, busy, hasDocuments, documentName, suggesti
       >
         <Input
           aria-label="Question"
-          placeholder={documentName ? `Ask about ${documentName}...` : "Upload a document to ask a question"}
+          placeholder={documentName ? `Ask about ${documentName}...` : hasDocuments ? "Ask a question..." : "Upload a document to ask a question"}
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
           disabled={!hasDocuments || !!busy}

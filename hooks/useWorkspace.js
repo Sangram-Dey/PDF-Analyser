@@ -16,7 +16,8 @@ function postJson(body) {
 }
 
 // Reads the answer stream: the server sends one JSON event per line, as soon as each is ready.
-async function* readEvents(response) {
+// Exported: the website widget's chat (components/embed/EmbedChat.jsx) reads the same stream.
+export async function* readEvents(response) {
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader(); // bytes → text
   let buffer = "";
   while (true) {
@@ -37,8 +38,13 @@ export function useWorkspace() {
   const [loading, setLoading] = useState(true); // the first load of the projects list
   const [busy, setBusy] = useState(""); // which action is running: "upload", "answer", "export", a document id...
   const [error, setError] = useState("");
+  const [failedQuestion, setFailedQuestion] = useState(""); // the banner offers it again with "Try again"
   const [uploading, setUploading] = useState([]); // names of files still being indexed
   const [uploadProgress, setUploadProgress] = useState({}); // the current file: { stage, parts, unit, done, total }
+  // The summary being made: { documentId, name, stage, done, total } (the robot and the file's card follow it), and the
+  // last one finished: { name, at } (the robot's "Summary ready").
+  const [summarizing, setSummarizing] = useState(null);
+  const [summarized, setSummarized] = useState(null);
   const selected = projects.find((project) => project.id === selectedId);
   // The chat answers from one document at a time. Until one is clicked (or if it was deleted), the newest file.
   const [chatDocumentId, setChatDocumentId] = useState("");
@@ -65,6 +71,7 @@ export function useWorkspace() {
   // Runs one action: marks it busy, shows any error in the banner, returns true on success.
   async function run(label, action) {
     setError("");
+    setFailedQuestion(""); // a new action replaces the old error, and its "Try again"
     setBusy(label);
     try {
       await action();
@@ -157,6 +164,7 @@ export function useWorkspace() {
       .filter((message) => !message.stage && message.documentId === documentId)
       .slice(-6)
       .map(({ role, text }) => ({ role, text }));
+    setFailedQuestion("");
     const updateAnswer = (patch) =>
       setMessages((items) => [...items.slice(0, -1), { ...items.at(-1), ...(typeof patch === "function" ? patch(items.at(-1)) : patch) }]);
 
@@ -180,10 +188,89 @@ export function useWorkspace() {
           else if (event.type === "error") throw new Error(event.message);
         }
       } catch (err) {
-        setMessages((items) => items.slice(0, -1)); // drop the unfinished answer; the error banner explains
+        setMessages((items) => items.slice(0, -2)); // drop the question and its unfinished answer: "Try again" re-asks it
+        setFailedQuestion(question);
         throw err;
       }
     });
+  }
+
+  // One file's website-assistant settings and today's usage, for the Embed panel. Throw on failure; the panel shows the error.
+  async function loadWidget(documentId) {
+    return (await api(`/api/projects/${selected.id}/documents/${documentId}/widget`)).widget;
+  }
+  // Saves one file's settings; its on/off dot in the file lists is updated in place.
+  async function saveWidget(documentId, settings) {
+    const projectId = selected.id;
+    const body = JSON.stringify(settings);
+    const { widget } = await api(`/api/projects/${projectId}/documents/${documentId}/widget`, { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+    setProjects((items) => items.map((project) => project.id !== projectId ? project : {
+      ...project,
+      documents: project.documents.map((doc) => (doc.id === documentId ? { ...doc, widgetEnabled: widget.enabled } : doc)),
+    }));
+    return widget;
+  }
+
+  // A file's saved summary ({ text, running, updatedAt, … }). Throws on failure; the summary sheet shows the error.
+  async function loadSummary(doc) {
+    return (await api(`/api/projects/${selected.id}/documents/${doc.id}/summary`)).summary;
+  }
+  // Makes (or re-makes) a file's summary, reporting progress events as they stream in. Doesn't mark the app busy:
+  // the chat and other files stay usable meanwhile. Returns the saved summary.
+  // One summary at a time in the app, so the robot and the cards follow a single run.
+  async function summarize(doc, onProgress) {
+    if (summarizing) throw new Error(`Wait for the summary of ${summarizing.name} to finish.`);
+    const projectId = selected.id;
+    setSummarizing({ documentId: doc.id, name: doc.name, stage: "reading" });
+    try {
+      const response = await fetch(`/api/projects/${projectId}/documents/${doc.id}/summary`, { method: "POST" });
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error || "Could not summarize this document.");
+      }
+      for await (const event of readEvents(response)) {
+        if (event.type === "progress") {
+          setSummarizing((current) => ({ ...current, ...event }));
+          onProgress?.(event);
+        } else if (event.type === "error") throw new Error(event.message);
+        else if (event.type === "done") {
+          setProjects((items) => items.map((project) => project.id !== projectId ? project : {
+            ...project,
+            documents: project.documents.map((item) => (item.id === doc.id ? { ...item, summaryAt: event.summary.updatedAt } : item)),
+          }));
+          setSummarized({ name: doc.name, at: Date.now() });
+          return event.summary;
+        }
+      }
+      throw new Error("The summary stopped before it finished. Try again.");
+    } finally {
+      setSummarizing(null);
+    }
+  }
+  // From a file's card: errors go to the app's error banner. Returns the summary, or null if it failed.
+  async function summarizeFromCard(doc) {
+    setError("");
+    try {
+      return await summarize(doc);
+    } catch (err) {
+      setError(err.message);
+      return null;
+    }
+  }
+  // Removes a file's saved summary (not the file). Throws on failure; the summary sheet shows the error.
+  async function deleteSummary(doc) {
+    const projectId = selected.id;
+    await api(`/api/projects/${projectId}/documents/${doc.id}/summary`, { method: "DELETE" });
+    setProjects((items) => items.map((project) => project.id !== projectId ? project : {
+      ...project,
+      documents: project.documents.map((item) => (item.id === doc.id ? { ...item, summaryAt: null } : item)),
+    }));
+  }
+
+  // An Excel file's cells for the preview drawer ({ sheets }), read from the saved file on the server.
+  // Read-only, and doesn't mark the app busy. Throws on failure. (PDFs open in a new tab instead: DocumentsPanel.)
+  async function loadPreview(doc) {
+    return api(`/api/projects/${selected.id}/documents/${doc.id}/preview`);
   }
 
   // The two export calls throw on failure, so the export sheet can show the error next to itself.
@@ -223,9 +310,14 @@ export function useWorkspace() {
 
   return {
     projects, selected, messages: chatMessages, loading, busy, error, uploading, uploadProgress, chatDocument,
-    clearError: () => setError(""),
+    clearError: () => {
+      setError("");
+      setFailedQuestion("");
+    },
+    retryAsk: failedQuestion ? () => ask(failedQuestion) : null, // set after a question failed
     selectChatDocument: setChatDocumentId, // shows that file's own chat; the others are kept for when you switch back
     selectProject, createProject, removeProject,
-    uploadFiles, removeDocument, ask, previewExport, downloadExport,
+    uploadFiles, removeDocument, ask, loadPreview, previewExport, downloadExport, loadWidget, saveWidget,
+    loadSummary, summarize, summarizeFromCard, deleteSummary, summarizing, summarized,
   };
 }

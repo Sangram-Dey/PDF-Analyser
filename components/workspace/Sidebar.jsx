@@ -6,6 +6,7 @@ import { FileText, Folder, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function Sidebar({ projects, selectedId, busy, loading, onSelect, onCreate }) {
   const [name, setName] = useState("");
@@ -17,16 +18,16 @@ export function Sidebar({ projects, selectedId, busy, loading, onSelect, onCreat
   }
 
   return (
-    <aside className="flex w-full flex-col bg-sidebar p-3 text-sidebar-foreground sm:w-64 sm:shrink-0 sm:p-4 sm:pt-7">
+    <aside data-robot-hide className="flex w-full flex-col bg-sidebar p-3 text-sidebar-foreground sm:w-64 sm:shrink-0 sm:p-4 sm:pt-7">
       <div className="flex items-center gap-2.5 px-2 pb-3 text-lg font-bold sm:pb-9">
         <span className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-primary to-glow">
-          <FileText className="size-4 text-white" />
+          <FileText className="size-4 text-primary-foreground" />
         </span>
         Sourcework
       </div>
 
       <p className="hidden px-3 pb-3 text-[10px] font-bold tracking-widest text-sidebar-muted sm:block">PROJECTS</p>
-      <nav aria-label="Projects" aria-busy={loading} className="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-y-auto">
+      <nav aria-label="Projects" aria-busy={loading} data-robot-spot="projects" className="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-y-auto">
         {/* While the projects load: three placeholder rows that pulse */}
         {loading &&
           [70, 55, 80].map((width) => (
@@ -79,12 +80,15 @@ export function Sidebar({ projects, selectedId, busy, loading, onSelect, onCreat
         </Button>
       </form>
 
-      {/* Clerk's account menu: avatar + name, with "Manage account" and "Sign out". */}
-      <div className="mt-auto hidden border-t border-sidebar-active px-2 pt-4 sm:block">
-        <UserButton
-          showName
-          appearance={{ elements: { userButtonBox: "flex-row-reverse", userButtonOuterIdentifier: "text-sm text-sidebar-foreground" } }}
-        />
+      {/* Clerk's account menu (avatar + name, "Manage account", "Sign out") and the light/dark switch */}
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-sidebar-active px-2 pt-3 sm:mt-auto sm:pt-4">
+        <span className="hidden sm:block">
+          <UserButton
+            showName
+            appearance={{ elements: { userButtonBox: "flex-row-reverse", userButtonOuterIdentifier: "text-sm text-sidebar-foreground" } }}
+          />
+        </span>
+        <ThemeToggle />
       </div>
     </aside>
   );
